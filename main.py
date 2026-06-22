@@ -84,5 +84,7 @@ def main():
                 
         print("-" * 50)
 
+input("\nНажмите Enter для выхода из программы...")
+
 if __name__ == "__main__":
     main()
