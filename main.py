@@ -2,10 +2,10 @@ import football_api
 
 def main():
     print("\n" + "="*50)
-    print("⚽ УМНЫЙ АНАЛИЗАТОР СТАТИСТИКИ (МОДУЛЬНЫЙ) ⚽")
+    print("Менеджер Статистики")
     print("="*50)
     
-    team_input = input("\nВведи команду (на англ., например: Arsenal): ").strip()
+    team_input = input("\nВведи команду (на русском, например: Аргентина или Зенит): ").strip()
     
     # Ищем все команды по введенному слову
     teams = football_api.search_teams(team_input)
