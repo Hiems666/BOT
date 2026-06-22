@@ -60,16 +60,14 @@ def search_teams(team_name):
 
     return teams
 # ==========================================
-# ЭНДПОИНТ 2: Последние матчи команды
+# ЭНДПОИНТ 2: Последние матчи команды (со счетом)
 # ==========================================
 def get_recent_fixtures(team_id, limit=5):
-    # Заходим в профиль команды
     url = f"https://soccer365.ru/clubs/{team_id}/"
     response = requests.get(url, headers=get_headers())
     soup = BeautifulSoup(response.text, 'html.parser')
 
     matches = []
-    # Используем класс из твоего скриншота
     game_links = soup.find_all('a', class_='game_link')
 
     for link in game_links:
@@ -78,7 +76,6 @@ def get_recent_fixtures(team_id, limit=5):
             fixture_id = href.strip('/').split('/')[-1]
             title = link.get('title', 'Матч')
 
-            # Разбиваем строку "Аргентина - Алжир" на хозяев и гостей
             home_name = "Хозяева"
             away_name = "Гости"
             if " - " in title:
@@ -86,15 +83,28 @@ def get_recent_fixtures(team_id, limit=5):
                 home_name = parts[0].strip()
                 away_name = parts[1].strip()
 
+            home_goals = "-"
+            away_goals = "-"
+            match_status = "Завершен"
+
+            gls_divs = link.find_all("div", class_="gls")
+            if len(gls_divs) >= 2:
+                home_goals = gls_divs[0].get_text(strip=True)
+                away_goals = gls_divs[1].get_text(strip=True)
+
+            status_div = link.find("div", class_="status")
+            if status_div:
+                match_status = status_div.get_text(strip=True)
+
             matches.append({
                 "fixture_id": fixture_id,
-                "date": "Завершен", # Дату опускаем для скорости работы
+                "date": match_status,
                 "home_name": home_name,
                 "home_id": "0", 
                 "away_name": away_name,
                 "away_id": "0",
-                "home_goals": "-",
-                "away_goals": "-"
+                "home_goals": home_goals,
+                "away_goals": away_goals
             })
 
         if len(matches) >= limit:
