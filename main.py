@@ -1,82 +1,88 @@
-import requests
-import json
-import sys
+import football_api
 
-def load_token(filename="config.json"):
-    """Читает только секретный токен из конфигурации"""
-    try:
-        with open(filename, "r", encoding="utf-8") as file:
-            config = json.load(file)
-            return config["api_token"]
-    except FileNotFoundError:
-        print("Ошибка: Файл config.json не найден!")
-        sys.exit(1)
-    except KeyError:
-        print("Ошибка: В файле config.json нет ключа 'api_token'!")
-        sys.exit(1)
-
-def get_interactive_team_form():
-    api_token = load_token()
+def main():
+    print("\n" + "="*50)
+    print("⚽ УМНЫЙ АНАЛИЗАТОР СТАТИСТИКИ (МОДУЛЬНЫЙ) ⚽")
+    print("="*50)
     
-    print("\n" + "="*40)
-    print("⚽ АНАЛИЗАТОР ФУТБОЛЬНОЙ СТАТИСТИКИ ⚽")
-    print("="*40)
+    team_input = input("\nВведи команду (на англ., например: Arsenal): ").strip()
     
-    # Интерактивный запрос ID команды
-    team_id_str = input("\nВведи ID команды (например, 764 для Бразилии): ")
+    # Ищем все команды по введенному слову
+    teams = football_api.search_teams(team_input)
     
-    # Валидация: проверяем, что ввели именно число
-    if not team_id_str.isdigit():
-        print("Ошибка ввода: ID должен состоять только из цифр. Запусти скрипт заново.")
+    if not teams:
+        print("❌ Команда не найдена.")
         return
         
-    team_id = int(team_id_str)
+    # Выводим удобное меню с выбором страны
+    print(f"\nНайдено несколько совпадений для '{team_input}'. Выбери нужную:")
     
-    # Интерактивный запрос количества матчей
-    limit_str = input("Сколько последних матчей показать? (Нажми Enter, чтобы оставить 5): ")
-    
-    # Если пользователь ничего не ввел (нажал Enter), ставим 5 по умолчанию
-    if limit_str == "":
-        limit = 5
-    elif limit_str.isdigit():
-        limit = int(limit_str)
-    else:
-        print("Неверный ввод количества. Будет показано 5 матчей.")
-        limit = 5
-
-    # Формируем запрос к API
-    url = f"https://api.football-data.org/v4/teams/{team_id}/matches/"
-    headers = {
-        "X-Auth-Token": api_token
-    }
-    querystring = {
-        "status": "FINISHED",
-        "limit": limit
-    }
-    
-    print(f"\nЗапрашиваем данные с сервера...")
-    response = requests.get(url, headers=headers, params=querystring)
-    
-    if response.status_code == 200:
-        data = response.json()
-        matches = data.get('matches', [])
+    # Показываем максимум 5 вариантов, чтобы не засорять экран
+    options_count = min(5, len(teams))
+    for i, team in enumerate(teams[:options_count]): 
+        print(f"{i+1} - {team['name']} (Страна: {team['country']})")
         
-        print(f"\n✅ Результат: Найдено {len(matches)} последних матчей")
-        print("-" * 40)
+    choice_idx = input(f"\nВведи номер нужной команды (1-{options_count}): ").strip()
+    
+    try:
+        idx = int(choice_idx) - 1
+        if idx < 0 or idx >= options_count:
+            raise ValueError
+        selected_team = teams[idx]
+    except ValueError:
+        print("❌ Неверный выбор. Запусти скрипт заново.")
+        return
         
-        for match in matches:
-            home_team = match['homeTeam']['name']
-            away_team = match['awayTeam']['name']
-            home_score = match['score']['fullTime']['home']
-            away_score = match['score']['fullTime']['away']
-            date = match['utcDate'][:10] 
+    team_id = selected_team["id"]
+    exact_name = selected_team["name"]
+    
+    print(f"\n✅ Ты выбрал: {exact_name} (ID: {team_id})")
+    
+    print("\nЧто именно ты хочешь проанализировать?")
+    print("1 - Просто результаты (без детальной статистики)")
+    print("2 - Только Фолы")
+    print("3 - Только Желтые карточки")
+    print("4 - Только Удары в створ")
+    print("5 - Выгрузить всё сразу")
+    
+    choice = input("Выбери цифру (1-5): ").strip()
+    limit_str = input("Сколько последних матчей показать? (Enter = 5): ")
+    limit = int(limit_str) if limit_str.isdigit() else 5
+    
+    print("\nЗагружаю данные (это может занять пару секунд)...")
+    
+    matches = football_api.get_recent_fixtures(team_id, limit=limit)
+    
+    if not matches:
+        print(f"\n⚠️ Нет завершенных матчей для {exact_name}.")
+        return
+        
+    print("\n" + "-"*50)
+    for match in matches:
+        fix_id = match["fixture_id"]
+        date = match["date"]
+        home = match["home_name"]
+        away = match["away_name"]
+        hg = match["home_goals"]
+        ag = match["away_goals"]
+        
+        print(f"[{date}] {home} {hg}:{ag} {away}")
+        
+        if choice != "1":
+            # Определяем, играла наша команда дома или в гостях
+            is_home_team = (team_id == match["home_id"])
+            stats = football_api.get_fixture_statistics(fix_id, is_home_team)
             
-            print(f"[{date}] {home_team} {home_score}:{away_score} {away_team}")
-            
-        print("-" * 40 + "\n")
-    else:
-        print(f"Ошибка сервера: {response.status_code}")
-        print(response.text)
+            if choice == "2":
+                print(f"   🚩 Фолы ({exact_name}): {stats['Fouls']}")
+            elif choice == "3":
+                print(f"   🟨 Желтые карточки ({exact_name}): {stats['Yellow cards']}")
+            elif choice == "4":
+                print(f"   🎯 Удары в створ ({exact_name}): {stats['Shots on target']}")
+            elif choice == "5":
+                print(f"   📊 Фолы: {stats['Fouls']} | ЖК: {stats['Yellow cards']} | Удары в створ: {stats['Shots on target']}")
+                
+        print("-" * 50)
 
 if __name__ == "__main__":
-    get_interactive_team_form()
+    main()
