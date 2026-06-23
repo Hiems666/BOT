@@ -120,7 +120,7 @@ def get_fixture_statistics(fixture_id, is_home_team):
     response = requests.get(url, headers=get_headers())
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    stats_dict = {"Fouls": "Нет данных", "Yellow cards": "Нет данных", "Shots on target": "Нет данных"}
+    stats_dict = {"Fouls": "Нет данных", "Yellow cards": "Нет данных", "Shots on target": "Нет данных", "Offsides": "Нет данных"}
 
     # Ищем конкретный контейнер "Весь матч" (у него id="stat-tp0")
     full_match_tab = soup.find('div', id='stat-tp0')
@@ -137,7 +137,7 @@ def get_fixture_statistics(fixture_id, is_home_team):
             title = title_div.text.strip()
             
             # Ищем только нужные нам метрики
-            if title in ["Фолы", "Желтые карточки", "Удары в створ"]:
+            if title in ["Фолы", "Желтые карточки", "Удары в створ", "Офсайды"]:
                 values = item.find_all('div', class_='stats_inf')
                 if len(values) >= 2:
                     home_val = values[0].text.strip()
@@ -154,6 +154,8 @@ def get_fixture_statistics(fixture_id, is_home_team):
                         stats_dict["Yellow cards"] = stat_str
                     elif title == "Удары в створ" and stats_dict["Shots on target"] == "Нет данных":
                         stats_dict["Shots on target"] = stat_str
+                    elif title == "Офсайды" and stats_dict["Offsides"] == "Нет данных":
+                        stats_dict["Offsides"] = stat_str
 
     time.sleep(0.5) # Небольшая пауза, чтобы нас не забанили
     return stats_dict
