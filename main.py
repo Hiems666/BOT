@@ -38,8 +38,9 @@ def run_analysis():
     print("3 - Только Желтые карточки")
     print("4 - Только Удары в створ")
     print("5 - Выгрузить всё сразу")
+    print("6 - Только Офсайды")
 
-    choice = input("Выбери цифру (1-5): ").strip()
+    choice = input("Выбери цифру (1-6): ").strip()
     limit_str = input("Сколько последних матчей показать? (Enter = 5): ")
     limit = int(limit_str) if limit_str.isdigit() else 5
 
@@ -77,6 +78,8 @@ def run_analysis():
                     f"   📊 Фолы: {stats['Fouls']} | ЖК: {stats['Yellow cards']} | "
                     f"Удары в створ: {stats['Shots on target']}"
                 )
+            elif choice == "6":
+                print(f"   🚩 Офсайды ({exact_name}): {stats['Offsides']}")
 
         print("-" * 50)
 
