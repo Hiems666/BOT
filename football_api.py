@@ -18,7 +18,7 @@ def _extract_club_id(url):
 # ЭНДПОИНТ 1: Поиск через DuckDuckGo (ddgs)
 # ==========================================
 def search_teams(team_name):
-    print(f"\n[Дебаг] Ищем профиль '{team_name}' через DuckDuckGo...")
+    print(f"\n[Дебаг] Ищем профиль '{team_name}'...")
     query = f"site:soccer365.ru/clubs/ {team_name}"
     teams = []
 
