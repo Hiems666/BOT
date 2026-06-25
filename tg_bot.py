@@ -1,11 +1,13 @@
-import os
-
 import telebot
 from telebot import types
 
 import football_api
+import json
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8279670008:AAEDNT5bRCVJ38TMEmVY_dpu7tE-Rb1SQ5c")
+with open("config.json", "r") as f:
+    config = json.load(f)
+
+TOKEN = config.get("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
 user_state = {}
@@ -271,7 +273,7 @@ def handle_limit_selection(call):
 
     result_text = build_results_text(selected_team, matches, choice)
     bot.edit_message_text(
-        f"✅ Готово. Отправляю результаты для {exact_name}...",
+        f"✅ Готово. Отправляю статистические данные команды {exact_name}...",
         chat_id,
         call.message.message_id,
     )
