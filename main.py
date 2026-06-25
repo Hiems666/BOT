@@ -14,7 +14,7 @@ def run_analysis():
 
     options_count = min(5, len(teams))
     for i, team in enumerate(teams[:options_count]):
-        print(f"{i+1} - {team['name']} (Страна: {team['country']})")
+        print(f"{i+1} - {team['name']}")
 
     choice_idx = input(f"\nВведи номер нужной команды (1-{options_count}): ").strip()
 
@@ -39,10 +39,23 @@ def run_analysis():
     print("4 - Только Удары в створ")
     print("5 - Выгрузить всё сразу")
     print("6 - Только Офсайды")
+    print("7 - Только Удары")
+    print("8 - Только Угловые")
 
-    choice = input("Выбери цифру (1-6): ").strip()
-    limit_str = input("Сколько последних матчей показать? (Enter = 5): ")
+    choice = input("Выбери цифру (1-8): ").strip()
+    limit_str = input(
+        f"Сколько последних матчей показать? (Enter = 5, макс. {football_api.MAX_FIXTURE_LIMIT}): "
+    )
     limit = int(limit_str) if limit_str.isdigit() else 5
+    if limit > football_api.MAX_FIXTURE_LIMIT:
+        print(
+            f"⚠️ Максимум {football_api.MAX_FIXTURE_LIMIT} матчей. "
+            f"Будет показано {football_api.MAX_FIXTURE_LIMIT}."
+        )
+        limit = football_api.MAX_FIXTURE_LIMIT
+    elif limit < 1:
+        print("⚠️ Минимум 1 матч. Будет показан 1.")
+        limit = 1
 
     print("\nЗагружаю данные (это может занять пару секунд)...")
 
@@ -76,10 +89,15 @@ def run_analysis():
             elif choice == "5":
                 print(
                     f"   📊 Фолы: {stats['Fouls']} | ЖК: {stats['Yellow cards']} | "
-                    f"Удары в створ: {stats['Shots on target']}"
+                    f"Удары: {stats['Shots']} | Удары в створ: {stats['Shots on target']} | "
+                    f"Угловые: {stats['Corners']} | Офсайды: {stats['Offsides']}"
                 )
             elif choice == "6":
                 print(f"   🚩 Офсайды ({exact_name}): {stats['Offsides']}")
+            elif choice == "7":
+                print(f"   ⚽ Удары ({exact_name}): {stats['Shots']}")
+            elif choice == "8":
+                print(f"   📐 Угловые ({exact_name}): {stats['Corners']}")
 
         print("-" * 50)
 
@@ -93,10 +111,10 @@ def main():
         run_analysis()
 
         action = input(
-            "\nНажмите Enter для выхода из программы или N для нового запроса: "
-        ).strip().lower()
+            "\nНажмите Enter для выхода или 1 для нового запроса: "
+        ).strip()
 
-        if action != "n":
+        if action != "1":
             print("До встречи!")
             break
 
