@@ -1,11 +1,13 @@
-import os
-
+import json
 import telebot
 from telebot import types
 
 import football_api
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8279670008:AAEDNT5bRCVJ38TMEmVY_dpu7tE-Rb1SQ5c")
+with open("config.json", "r") as f:
+    config = json.load(f)
+
+TOKEN = config.get("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
 
 user_state = {}
