@@ -1,4 +1,7 @@
+import json
 import re
+from pathlib import Path
+
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -99,6 +102,61 @@ _STAT_TITLE_MAP = {
     "Угловые": "Corners",
 }
 MAX_FIXTURE_LIMIT = 15
+THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
+_TEAM_NAME_ALIASES = {
+    "португалия": "portugal",
+    "венгрия": "hungary",
+    "англия": "england",
+    "уэльс": "wales",
+    "шотландия": "scotland",
+    "аргентина": "argentina",
+    "бразилия": "brazil",
+    "германия": "germany",
+    "испания": "spain",
+    "франция": "france",
+    "италия": "italy",
+    "нидерланды": "netherlands",
+    "голландия": "netherlands",
+    "бельгия": "belgium",
+    "хорватия": "croatia",
+    "сербия": "serbia",
+    "турция": "turkey",
+    "россия": "russia",
+    "украина": "ukraine",
+    "польша": "poland",
+    "чехия": "czech republic",
+    "австрия": "austria",
+    "швейцария": "switzerland",
+    "швеция": "sweden",
+    "норвегия": "norway",
+    "дания": "denmark",
+    "финляндия": "finland",
+    "греция": "greece",
+    "румыния": "romania",
+    "словакия": "slovakia",
+    "словения": "slovenia",
+    "зенит": "zenit",
+    "спартак": "spartak",
+    "цска": "cska",
+    "локомотив": "lokomotiv",
+    "краснодар": "krasnodar",
+    "динамо": "dynamo",
+}
+
+_INTERNATIONAL_SPORT_PRIORITY = (
+    "soccer_fifa_world_cup_qualifiers_europe",
+    "soccer_fifa_world_cup_qualifiers_south_america",
+    "soccer_uefa_nations_league",
+    "soccer_uefa_european_championship",
+    "soccer_fifa_world_cup",
+    "soccer_conmebol_copa_america",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_champs_league",
+)
+
+_the_odds_api_key = None
+_soccer_sport_keys = None
 
 def _empty_stats():
     return {key: None for key in _STAT_KEYS}
@@ -234,6 +292,272 @@ def parse_fixture_statistics(html_text):
 
     return stats_dict
 
+def parse_upcoming_fixtures(html_text, limit=5):
+    """Извлекает будущие матчи из HTML-кода страницы клуба."""
+    soup = BeautifulSoup(html_text, "html.parser")
+    matches = []
+    game_links = soup.find_all("a", class_="game_link")
+
+    for link in game_links:
+        status_div = link.find("div", class_="status")
+        if not status_div:
+            continue
+
+        status_text = status_div.get_text(strip=True)
+        title = link.get("title", "Матч")
+
+        home_name = "Хозяева"
+        away_name = "Гости"
+        if " - " in title:
+            parts = title.split(" - ")
+            home_name = parts[0].strip()
+            away_name = parts[1].strip()
+
+        home_goals = "-"
+        away_goals = "-"
+        ht = link.find("div", class_="ht")
+        at = link.find("div", class_="at")
+        if ht and at:
+            home_gls = ht.find("div", class_="gls")
+            away_gls = at.find("div", class_="gls")
+            if home_gls:
+                home_goals = home_gls.get_text(strip=True) or "-"
+            if away_gls:
+                away_goals = away_gls.get_text(strip=True) or "-"
+
+        if home_goals != "-" or away_goals != "-":
+            continue
+
+        fixture_id = link.get("dt-id")
+        if not fixture_id:
+            href = link.get("href", "")
+            if "/games/" in href:
+                fixture_id = href.strip("/").split("/")[-1]
+
+        matches.append({
+            "fixture_id": fixture_id,
+            "date": status_text,
+            "home_name": home_name,
+            "away_name": away_name,
+            "odds_1": "-",
+            "odds_x": "-",
+            "odds_2": "-",
+        })
+
+        if len(matches) >= limit:
+            break
+
+    return matches
+
+
+def _get_the_odds_api_key():
+    global _the_odds_api_key
+    if _the_odds_api_key is not None:
+        return _the_odds_api_key
+
+    config_path = Path(__file__).resolve().parent / "config.json"
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as config_file:
+            _the_odds_api_key = json.load(config_file).get("the_odds_api_key")
+    else:
+        _the_odds_api_key = ""
+
+    return _the_odds_api_key
+
+
+def _normalize_team_name(name):
+    normalized = re.sub(r"\s+", " ", name.lower().strip())
+    normalized = normalized.replace("ё", "е")
+    return _TEAM_NAME_ALIASES.get(normalized, normalized)
+
+
+def _team_tokens_match(left, right):
+    left_norm = _normalize_team_name(left)
+    right_norm = _normalize_team_name(right)
+    if left_norm == right_norm:
+        return True
+    return left_norm in right_norm or right_norm in left_norm
+
+
+def _event_matches_teams(event, home_name, away_name):
+    event_home = event.get("home_team", "")
+    event_away = event.get("away_team", "")
+    direct = _team_tokens_match(event_home, home_name) and _team_tokens_match(event_away, away_name)
+    reverse = _team_tokens_match(event_home, away_name) and _team_tokens_match(event_away, home_name)
+    return direct or reverse
+
+
+def _get_soccer_sport_keys():
+    global _soccer_sport_keys
+    if _soccer_sport_keys is not None:
+        return _soccer_sport_keys
+
+    api_key = _get_the_odds_api_key()
+    if not api_key:
+        _soccer_sport_keys = []
+        return _soccer_sport_keys
+
+    try:
+        response = requests.get(
+            f"{THE_ODDS_API_BASE}/sports",
+            params={"apiKey": api_key},
+            timeout=15,
+        )
+        response.raise_for_status()
+        all_keys = [
+            sport["key"]
+            for sport in response.json()
+            if sport.get("key", "").startswith("soccer_")
+        ]
+    except requests.exceptions.RequestException:
+        _soccer_sport_keys = list(_INTERNATIONAL_SPORT_PRIORITY)
+        return _soccer_sport_keys
+
+    ordered = []
+    for sport_key in _INTERNATIONAL_SPORT_PRIORITY:
+        if sport_key in all_keys:
+            ordered.append(sport_key)
+    for sport_key in all_keys:
+        if sport_key not in ordered:
+            ordered.append(sport_key)
+
+    _soccer_sport_keys = ordered
+    return _soccer_sport_keys
+
+
+def _parse_h2h_odds(event):
+    home_team = event.get("home_team", "")
+    away_team = event.get("away_team", "")
+    odds_1 = odds_x = odds_2 = "-"
+
+    for bookmaker in event.get("bookmakers", []):
+        for market in bookmaker.get("markets", []):
+            if market.get("key") != "h2h":
+                continue
+
+            for outcome in market.get("outcomes", []):
+                name = outcome.get("name", "")
+                price = outcome.get("price")
+                if price is None:
+                    continue
+                price_text = f"{float(price):.2f}".rstrip("0").rstrip(".")
+                if name.lower() == "draw":
+                    odds_x = price_text
+                elif _team_tokens_match(name, home_team):
+                    odds_1 = price_text
+                elif _team_tokens_match(name, away_team):
+                    odds_2 = price_text
+
+            if odds_1 != "-" and odds_x != "-" and odds_2 != "-":
+                return {
+                    "odds_1": odds_1,
+                    "odds_x": odds_x,
+                    "odds_2": odds_2,
+                }
+
+    return {
+        "odds_1": odds_1,
+        "odds_x": odds_x,
+        "odds_2": odds_2,
+    }
+
+
+def _event_involves_team(event, team_name):
+    return (
+        _team_tokens_match(event.get("home_team", ""), team_name)
+        or _team_tokens_match(event.get("away_team", ""), team_name)
+    )
+
+
+def _format_api_date(iso_time):
+    if not iso_time:
+        return "-"
+    try:
+        normalized = iso_time.replace("Z", "+00:00")
+        match = re.match(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})", normalized)
+        if not match:
+            return iso_time
+        year, month, day, hour, minute = match.groups()
+        return f"{day}.{month}, {hour}:{minute}"
+    except ValueError:
+        return iso_time
+
+
+def _has_valid_odds(odds):
+    return any(value != "-" for value in odds.values())
+
+
+def _build_match_from_event(event):
+    odds = _parse_h2h_odds(event)
+    return {
+        "home_name": event.get("home_team", ""),
+        "away_name": event.get("away_team", ""),
+        "date": _format_api_date(event.get("commence_time")),
+        "odds_1": odds["odds_1"],
+        "odds_x": odds["odds_x"],
+        "odds_2": odds["odds_2"],
+    }
+
+
+def find_odds_for_teams(home_name, away_name, preferred_team=None):
+    """Ищет коэффициенты 1X2 в The Odds API для матча или ближайшего матча команды."""
+    api_key = _get_the_odds_api_key()
+    if not api_key:
+        return None
+
+    fallback_event = None
+
+    for sport_key in _get_soccer_sport_keys():
+        try:
+            response = requests.get(
+                f"{THE_ODDS_API_BASE}/sports/{sport_key}/odds",
+                params={
+                    "apiKey": api_key,
+                    "regions": "eu",
+                    "markets": "h2h",
+                    "oddsFormat": "decimal",
+                },
+                timeout=15,
+            )
+            if response.status_code != 200:
+                continue
+
+            events = response.json()
+            if not events:
+                continue
+
+            for event in events:
+                odds = _parse_h2h_odds(event)
+                if not _has_valid_odds(odds):
+                    continue
+
+                if _event_matches_teams(event, home_name, away_name):
+                    return _build_match_from_event(event)
+
+                if preferred_team and _event_involves_team(event, preferred_team):
+                    if fallback_event is None or event.get("commence_time", "") < fallback_event.get("commence_time", ""):
+                        fallback_event = event
+        except requests.exceptions.RequestException:
+            continue
+
+    if fallback_event:
+        return _build_match_from_event(fallback_event)
+
+    return None
+
+
+def get_match_odds(home_name, away_name, preferred_team=None):
+    """Возвращает коэффициенты 1X2 через The Odds API."""
+    match = find_odds_for_teams(home_name, away_name, preferred_team=preferred_team)
+    if not match:
+        return {"odds_1": "-", "odds_x": "-", "odds_2": "-"}
+
+    return {
+        "odds_1": match["odds_1"],
+        "odds_x": match["odds_x"],
+        "odds_2": match["odds_2"],
+    }
+
 # ==========================================
 # ОРКЕСТРАТОРЫ (Связывают сеть и парсинг)
 # ==========================================
@@ -262,3 +586,45 @@ def get_fixture_statistics(fixture_id, is_home_team):
 
     time.sleep(0.5) # Пауза защиты от бана
     return stats
+
+def get_upcoming_fixtures(team_id, limit=3):
+    url = f"https://soccer365.ru/clubs/{team_id}/"
+    html_text = fetch_html(url)
+
+    if not html_text:
+        return []
+
+    return parse_upcoming_fixtures(html_text, limit)
+
+
+def get_next_match_with_odds(team_id, team_name=None):
+    """Возвращает ближайший матч команды с коэффициентами 1X2."""
+    upcoming = get_upcoming_fixtures(team_id, limit=1)
+    if not upcoming:
+        return None
+
+    match = upcoming[0]
+    preferred_team = team_name or match["home_name"]
+    api_match = find_odds_for_teams(
+        match["home_name"],
+        match["away_name"],
+        preferred_team=preferred_team,
+    )
+
+    if api_match and _has_valid_odds(api_match):
+        if not _event_matches_teams(
+            {"home_team": api_match["home_name"], "away_team": api_match["away_name"]},
+            match["home_name"],
+            match["away_name"],
+        ):
+            match["date"] = api_match["date"]
+            match["home_name"] = api_match["home_name"]
+            match["away_name"] = api_match["away_name"]
+            match["odds_source"] = "the-odds-api"
+        match["odds_1"] = api_match["odds_1"]
+        match["odds_x"] = api_match["odds_x"]
+        match["odds_2"] = api_match["odds_2"]
+    else:
+        match.update({"odds_1": "-", "odds_x": "-", "odds_2": "-"})
+
+    return match

@@ -65,7 +65,7 @@ def build_results_text(selected_team, matches, choice):
     exact_name = selected_team["name"]
     divider = "-" * 40
     lines = [
-        f"✅ {exact_name} (ID: {team_id})",
+        f"✅ {exact_name}",
         f"Матчей: {len(matches)}",
         "",
     ]
@@ -183,22 +183,12 @@ def handle_team_selection(call):
         )
 
     bot.edit_message_text(
-        f"✅ Ты выбрал: {selected_team['name']} (ID: {selected_team['id']})\n\n"
+        f"✅ Ты выбрал: {selected_team['name']}\n\n"
         "Что именно ты хочешь проанализировать?",
-        chat_id,
-        call.message.message_id,
-        reply_markup=markup,
-    )
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("analysis_"))
-def handle_analysis_selection(call):
-    chat_id = call.message.chat.id
-    state = get_state(chat_id)
-
-    if "selected_team" not in state:
-        bot.answer_callback_query(call.id, "Сначала выбери команду. /start")
-        return
+    chat_id,
+    call.message.message_id,
+    reply_markup=markup,
+)
 
     try:
         choice = call.data.split("_", 1)[1]
