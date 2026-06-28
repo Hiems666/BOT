@@ -3,7 +3,11 @@ import football_api
 
 def print_next_match_odds(team_id, exact_name):
     print("\nЗагружаю данные о ближайшем матче...")
-    next_match = football_api.get_next_match_with_odds(team_id, team_name=exact_name)
+    if football_api.ODDS_API_ENABLED:
+        next_match = football_api.get_next_match_with_odds(team_id, team_name=exact_name)
+    else:
+        upcoming = football_api.get_upcoming_fixtures(team_id, limit=1)
+        next_match = upcoming[0] if upcoming else None
 
     if not next_match:
         print(f"\n⚠️ Нет данных о ближайшем матче для {exact_name}.")
@@ -15,12 +19,13 @@ def print_next_match_odds(team_id, exact_name):
     print(
         f"[{next_match['date']}] {next_match['home_name']} — {next_match['away_name']}"
     )
-    print(
-        f"   Коэффициенты: П1 {next_match['odds_1']} | "
-        f"X {next_match['odds_x']} | П2 {next_match['odds_2']}"
-    )
-    if next_match.get("odds_source") == "the-odds-api":
-        print("   Источник коэффициентов: The Odds API (ближайший матч в линии букмекеров)")
+    if football_api.ODDS_API_ENABLED:
+        print(
+            f"   Коэффициенты: П1 {next_match['odds_1']} | "
+            f"X {next_match['odds_x']} | П2 {next_match['odds_2']}"
+        )
+        if next_match.get("odds_source") == "the-odds-api":
+            print("   Источник коэффициентов: The Odds API (ближайший матч в линии букмекеров)")
 
 
 def run_analysis():

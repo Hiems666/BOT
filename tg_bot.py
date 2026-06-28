@@ -1,5 +1,6 @@
 import telebot
 from telebot import types
+import ai_expert
 
 import football_api
 import json
@@ -24,6 +25,8 @@ ANALYSIS_OPTIONS = (
 )
 
 LIMIT_OPTIONS = (1, 5, 10, football_api.MAX_FIXTURE_LIMIT)
+
+FORM_MATCHES = 5  # сколько последних матчей анализировать для формы команды в режиме ИИ
 
 TELEGRAM_MESSAGE_LIMIT = 4096
 
@@ -106,11 +109,52 @@ def send_long_message(chat_id, text):
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
     clear_state(message.chat.id)
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            text="📊 Просмотр статистики",
+            callback_data="mode_stats",
+        )
+    )
+    markup.add(
+        types.InlineKeyboardButton(
+            text="🧠 ИИ-прогноз на матч",
+            callback_data="mode_ai",
+        )
+    )
     bot.send_message(
         message.chat.id,
-        "Привет! ⚽️ Напиши название футбольной команды (например: Аргентина или Зенит), "
-        "и я найду её последние матчи со статистикой.",
+        "Привет! ⚽️ Выбери режим работы:\n\n"
+        "📊 *Просмотр статистики* — классический разбор последних матчей команды.\n"
+        "🧠 *ИИ-прогноз на матч* — найду ближайший матч команды и дам прогноз "
+        "по статистике обеих команд и коэффициентам букмекеров.",
+        parse_mode="Markdown",
+        reply_markup=markup,
     )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("mode_"))
+def handle_mode_selection(call):
+    chat_id = call.message.chat.id
+    clear_state(chat_id)
+    state = get_state(chat_id)
+    mode = call.data.split("_", 1)[1]
+    state["mode"] = mode
+    bot.answer_callback_query(call.id)
+
+    if mode == "ai":
+        text = (
+            "🧠 Режим ИИ-прогноза.\n\n"
+            "Напиши название команды — найду её ближайший матч и подготовлю прогноз."
+        )
+    else:
+        text = (
+            "📊 Режим просмотра статистики.\n\n"
+            "Напиши название команды (например: Аргентина или Зенит), "
+            "и я найду её последние матчи со статистикой."
+        )
+
+    bot.edit_message_text(text, chat_id, call.message.message_id)
 
 
 @bot.message_handler(content_types=["text"])
@@ -120,8 +164,10 @@ def handle_team_search(message):
 
     chat_id = message.chat.id
     team_input = message.text.strip()
+    mode = get_state(chat_id).get("mode", "stats")
     clear_state(chat_id)
     state = get_state(chat_id)
+    state["mode"] = mode
 
     msg = bot.send_message(chat_id, f"🔍 Ищу команду «{team_input}»...")
     teams = football_api.search_teams(team_input)
@@ -173,6 +219,10 @@ def handle_team_selection(call):
     state["selected_team"] = selected_team
     bot.answer_callback_query(call.id)
 
+    if state.get("mode") == "ai":
+        show_ai_nearest_match(chat_id, call.message.message_id, state)
+        return
+
     markup = types.InlineKeyboardMarkup(row_width=2)
     for key, label in ANALYSIS_OPTIONS:
         markup.add(
@@ -185,10 +235,75 @@ def handle_team_selection(call):
     bot.edit_message_text(
         f"✅ Ты выбрал: {selected_team['name']}\n\n"
         "Что именно ты хочешь проанализировать?",
-    chat_id,
-    call.message.message_id,
-    reply_markup=markup,
-)
+        chat_id,
+        call.message.message_id,
+        reply_markup=markup,
+    )
+
+
+def show_ai_nearest_match(chat_id, message_id, state):
+    selected_team = state["selected_team"]
+    bot.edit_message_text(
+        f"🔎 Ищу ближайший матч команды {selected_team['name']}...",
+        chat_id,
+        message_id,
+    )
+
+    upcoming = football_api.get_nearest_upcoming_fixture(selected_team["id"])
+    if not upcoming:
+        bot.edit_message_text(
+            f"⚠️ Не нашёл предстоящих матчей для {selected_team['name']}.\n"
+            "Напиши название другой команды или /start.",
+            chat_id,
+            message_id,
+        )
+        return
+
+    match = upcoming
+    state["ai_match"] = match
+
+    odds_preview = ""
+    if match.get("fixture_id"):
+        line = football_api.get_fixture_betting_line(
+            match["fixture_id"],
+            match["home_name"],
+            match["away_name"],
+            preferred_team=selected_team["name"],
+        )
+        if line and line.get("bookmakers"):
+            book = line["bookmakers"][0]
+            markets = book.get("markets", {})
+            if "1" in markets and "X" in markets and "2" in markets:
+                odds_preview = (
+                    f"\n📊 Линия ({book['bookmaker']}): "
+                    f"П1 {markets['1']} | X {markets['X']} | П2 {markets['2']}"
+                )
+            state["betting_line"] = line
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton(
+            text="🧠 Сделать ИИ-прогноз",
+            callback_data="predict_go",
+        )
+    )
+
+    bot.edit_message_text(
+        f"📅 Ближайший матч:\n\n"
+        f"*{match['home_name']}* — *{match['away_name']}*\n"
+        f"🗓 {match['date']}{odds_preview}\n\n"
+        "Запустить прогноз ИИ по форме обеих команд и линии букмекера?",
+        chat_id,
+        message_id,
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("analysis_"))
+def handle_analysis_selection(call):
+    chat_id = call.message.chat.id
+    state = get_state(chat_id)
 
     try:
         choice = call.data.split("_", 1)[1]
@@ -268,11 +383,76 @@ def handle_limit_selection(call):
         call.message.message_id,
     )
     send_long_message(chat_id, result_text)
+
     bot.send_message(
         chat_id,
         "Напиши название другой команды или отправь /start для нового запроса.",
     )
-    clear_state(chat_id)
+
+
+def _resolve_team_id(name, candidate_id):
+    """Возвращает id команды: берёт готовый id, иначе ищет по названию."""
+    if candidate_id and str(candidate_id) != "0":
+        return candidate_id
+    found = football_api.search_teams(name)
+    return found[0]["id"] if found else None
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "predict_go")
+def handle_ai_prediction(call):
+    chat_id = call.message.chat.id
+    state = get_state(chat_id)
+    match = state.get("ai_match")
+    selected_team = state.get("selected_team")
+
+    if not match or not selected_team:
+        bot.answer_callback_query(call.id, "Данные устарели. Начни заново: /start")
+        return
+
+    bot.answer_callback_query(call.id, "Запускаю ИИ-аналитика...")
+    msg = bot.send_message(
+        chat_id,
+        "⏳ Собираю форму обеих команд и линию букмекера...\n"
+        "Это может занять до минуты.",
+    )
+
+    home_name = match["home_name"]
+    away_name = match["away_name"]
+
+    home_id = _resolve_team_id(home_name, match.get("home_id"))
+    away_id = _resolve_team_id(away_name, match.get("away_id"))
+
+    home_form = football_api.get_team_form_stats(home_id, limit=FORM_MATCHES) if home_id else None
+    away_form = football_api.get_team_form_stats(away_id, limit=FORM_MATCHES) if away_id else None
+
+    odds_info = state.get("betting_line")
+    if not odds_info:
+        odds_info = football_api.get_fixture_betting_line(
+            match.get("fixture_id"),
+            home_name,
+            away_name,
+            preferred_team=selected_team["name"],
+        )
+
+    ai_text = ai_expert.get_match_prediction(
+        home_name,
+        away_name,
+        home_form,
+        away_form,
+        odds_info,
+        fixture_id=match.get("fixture_id"),
+        home_id=home_id,
+        away_id=away_id,
+    )
+
+    header = f"🧠 ИИ-прогноз на матч:\n{home_name} — {away_name}\n\n"
+    bot.edit_message_text("✅ Готово! Вот разбор:", chat_id, msg.message_id)
+    send_long_message(chat_id, header + ai_text)
+
+    bot.send_message(
+        chat_id,
+        "Напиши название другой команды или отправь /start, чтобы сменить режим.",
+    )
 
 
 if __name__ == "__main__":
